@@ -1,0 +1,31 @@
+# =============================================================================
+# Tarball exclusions.
+#
+# `files` in package.json whitelists whole directories (src/, scripts/), which is
+# the right default — but a whitelisted DIRECTORY pulls in everything beneath it,
+# including build detritus a local install or an agent dropped there. This file
+# is the second gate.
+#
+# `yarn pack` and `npm pack` disagree about nested node_modules: yarn excludes it,
+# npm does NOT when the parent directory is whitelisted in `files`. Publishing
+# happens via `yarn npm publish`, so yarn's behaviour is what ships today — but
+# relying on that is relying on an accident of tooling. The rules below make both
+# commands produce the same tarball, and CI asserts it.
+# =============================================================================
+
+**/node_modules/
+
+# wrangler local state, including the account identity file it writes on first
+# login (account ID + the account's display name, usually an email address).
+**/.wrangler/
+
+# Agent tooling session state and local plans, wherever an agent's cwd dropped them.
+**/.omc/
+.omc/
+
+# Local-only artifacts.
+coverage/
+.DS_Store
+*.log
+.env
+.env.local

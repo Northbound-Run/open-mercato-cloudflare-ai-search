@@ -1,0 +1,129 @@
+{
+  "name": "@northbound-run/search-cloudflare-ai",
+  "version": "0.1.0",
+  "description": "Cloudflare AI Search as a pluggable fulltext driver for Open Mercato: hybrid BM25 + vector retrieval behind the stock FullTextSearchDriver contract, with no search service to operate.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "license": "MIT",
+  "author": "Northbound",
+  "homepage": "https://github.com/Northbound-Run/open-mercato-cloudflare-ai-search",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Northbound-Run/open-mercato-cloudflare-ai-search.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Northbound-Run/open-mercato-cloudflare-ai-search/issues"
+  },
+  "keywords": [
+    "open-mercato",
+    "open-mercato-module",
+    "cloudflare",
+    "ai-search",
+    "autorag",
+    "search",
+    "fulltext",
+    "hybrid-search",
+    "rag"
+  ],
+  "packageManager": "yarn@4.12.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "jest --config jest.config.cjs",
+    "typecheck": "tsc --noEmit",
+    "spike": "tsx scripts/spike.ts",
+    "prepack": "yarn build"
+  },
+  "files": [
+    "src",
+    "dist",
+    "scripts",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": "./dist/index.js",
+    "./*.ts": {
+      "types": "./src/*.ts",
+      "default": "./dist/*.js"
+    },
+    "./*.tsx": {
+      "types": "./src/*.tsx",
+      "default": "./dist/*.js"
+    },
+    "./*.json": "./src/*.json",
+    "./*": {
+      "types": [
+        "./src/*.ts",
+        "./src/*.tsx"
+      ],
+      "default": "./dist/*.js"
+    },
+    "./*/*.json": "./src/*/*.json",
+    "./*/*": {
+      "types": [
+        "./src/*/*.ts",
+        "./src/*/*.tsx"
+      ],
+      "default": "./dist/*/*.js"
+    },
+    "./*/*/*.json": "./src/*/*/*.json",
+    "./*/*/*": {
+      "types": [
+        "./src/*/*/*.ts",
+        "./src/*/*/*.tsx"
+      ],
+      "default": "./dist/*/*/*.js"
+    },
+    "./*/*/*/*.json": "./src/*/*/*/*.json",
+    "./*/*/*/*": {
+      "types": [
+        "./src/*/*/*/*.ts",
+        "./src/*/*/*/*.tsx"
+      ],
+      "default": "./dist/*/*/*/*.js"
+    }
+  },
+  "peerDependencies": {
+    "@open-mercato/search": ">=0.6.6 <0.7.0",
+    "@open-mercato/shared": ">=0.6.0 <0.7.0"
+  },
+  "devDependencies": {
+    "@mikro-orm/core": "^7.0.14",
+    "@mikro-orm/postgresql": "^7.0.14",
+    "@open-mercato/core": "^0.6.6",
+    "@open-mercato/events": "^0.6.6",
+    "@open-mercato/queue": "^0.6.6",
+    "@open-mercato/search": "^0.6.6",
+    "@open-mercato/shared": "^0.6.6",
+    "@open-mercato/ui": "^0.6.6",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.20.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "awilix": "^12.1.1",
+    "bcryptjs": "^3.0.3",
+    "bullmq": "^6.0.3",
+    "esbuild": "^0.28.1",
+    "glob": "^13.0.6",
+    "ioredis": "^6.0.0",
+    "jest": "^30.4.2",
+    "kysely": "^0.29.4",
+    "next": "^15.5.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "ts-jest": "^29.4.11",
+    "tsx": "^4.20.0",
+    "typescript": "^5.6.0",
+    "zod": "^4.3.6"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org",
+    "provenance": true
+  }
+}

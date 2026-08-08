@@ -1,0 +1,139 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # MUST come before setup-node. `cache: yarn` makes setup-node shell out to
+      # `yarn cache dir`, and the runner's global yarn is 1.22 — which refuses to
+      # run at all against this package.json's "packageManager": "yarn@4.12.0".
+      # Enabling corepack first is what makes `yarn` resolve to 4.x for every
+      # later step, including setup-node's own.
+      - name: Enable Corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: yarn
+
+      - name: Install
+        run: yarn install --immutable
+
+      - name: Typecheck
+        run: yarn typecheck
+
+      - name: Test
+        run: yarn test
+
+      - name: Build
+        run: yarn build
+
+      # The published tarball must contain BOTH src/ and dist/. Consumers import
+      # from dist/, but `mercato module add` reads module identity by parsing
+      # src/ as text, so a dist-only package silently fails to install. Assert
+      # the shape here rather than discovering it after publish.
+      - name: Assert package contents
+        run: |
+          set -euo pipefail
+          yarn pack --out /tmp/package.tgz
+          contents=$(tar -tzf /tmp/package.tgz)
+          for required in \
+            "package/src/index.ts" \
+            "package/src/register.ts" \
+            "package/src/lib/driver.ts" \
+            "package/dist/index.js" \
+            "package/dist/register.js" \
+            "package/dist/lib/driver.js"
+          do
+            if ! grep -qx "$required" <<< "$contents"; then
+              echo "::error::missing from tarball: $required"
+              exit 1
+            fi
+          done
+          echo "tarball shape OK"
+
+      # The `files` whitelist includes whole directories, so anything a local
+      # install or a stray tool drops inside one rides along. Not hypothetical:
+      # wrangler writes an account identity file — account ID plus the account's
+      # display name, usually the owner's email address — under .wrangler/, and
+      # `npm pack` includes it even where `yarn pack` does not.
+      - name: Assert tarball carries no local state or account identity
+        run: |
+          set -euo pipefail
+          # A dedicated directory: the step above writes /tmp/package.tgz, and
+          # globbing that up here would check the wrong artifact twice.
+          guard=$(mktemp -d)
+          for packer in "yarn pack --out $guard/guard.tgz" "npm pack --pack-destination $guard"; do
+            rm -rf "$guard"; mkdir -p "$guard"
+            eval "$packer" >/dev/null
+            tgz=$(find "$guard" -name '*.tgz' | head -1)
+            if [ -z "$tgz" ]; then
+              echo "::error::$packer produced no tarball"
+              exit 1
+            fi
+            contents=$(tar -tzf "$tgz")
+            # -F: these are literal paths, not patterns. Without it the leading
+            # dot is a regex wildcard and "/wrangler/" matches ".wrangler/",
+            # failing the build on a perfectly clean tarball.
+            for forbidden in "node_modules/" ".wrangler/" ".omc/" ".env"; do
+              if grep -qF -- "$forbidden" <<< "$contents"; then
+                echo "::error::$packer produced a tarball containing '$forbidden'"
+                grep -- "$forbidden" <<< "$contents" | head -5
+                exit 1
+              fi
+            done
+            # Belt and braces: no personal email address, and no bare Cloudflare
+            # account id, anywhere in the packed bytes. Deliberately NOT
+            # `tar -xzO | grep -q`: under `pipefail`, grep -q exits on first
+            # match, tar takes SIGPIPE, and the pipeline reports failure — so a
+            # hit would read as "no match" and the guard would pass precisely
+            # when it should fail. Materialise first, then grep.
+            tar -xzOf "$tgz" > "$guard/packed-bytes" 2>/dev/null || true
+            if grep -aqE '[A-Za-z0-9._%+-]+@(gmail|outlook|hotmail|yahoo|icloud|proton)\.[a-z]+' "$guard/packed-bytes"; then
+              echo "::error::$packer tarball contains a personal e-mail address"
+              exit 1
+            fi
+            # A Cloudflare account id is 32 lowercase hex chars. The harness once
+            # carried one as a default; nothing should carry one again.
+            if grep -aqE '\b[0-9a-f]{32}\b' "$guard/packed-bytes"; then
+              echo "::error::$packer tarball contains something shaped like a Cloudflare account id"
+              grep -aoE '\b[0-9a-f]{32}\b' "$guard/packed-bytes" | sort -u | head -5
+              exit 1
+            fi
+            rm -f "$guard/packed-bytes"
+            echo "  clean: $packer"
+          done
+          echo "tarball hygiene OK"
+
+      # The driver must load under raw Node ESM from dist/ — that is how the
+      # consuming app, the CLI and the migrations all reach it. A bad relative
+      # specifier in the build output only shows up here.
+      - name: Assert driver loads from dist
+        run: |
+          set -euo pipefail
+          node --input-type=module -e "
+            const { createAiSearchDriver } = await import('./dist/index.js')
+            const driver = createAiSearchDriver({
+              accountId: 'a', apiToken: 'b', instanceId: 'c',
+            })
+            if (driver.id !== 'cloudflare-ai-search') throw new Error('driver id drifted')
+            for (const method of ['ensureReady','isHealthy','search','index','delete']) {
+              if (typeof driver[method] !== 'function') {
+                throw new Error('FullTextSearchDriver contract broken: missing ' + method)
+              }
+            }
+            console.log('driver loads cleanly from dist')
+          "
