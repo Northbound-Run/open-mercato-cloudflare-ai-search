@@ -41,6 +41,23 @@ jobs:
       - name: Build
         run: yarn build
 
+      # ModuleInfo.version is a literal that `mercato module add` reads by
+      # parsing the file as text, so it cannot derive itself from package.json.
+      # publish.yml syncs it on release; this catches a hand-edit that forgot.
+      - name: Assert module metadata version matches package.json
+        run: |
+          set -euo pipefail
+          pkg=$(node -p "require('./package.json').version")
+          mod=$(node -e "
+            const s = require('fs').readFileSync('src/modules/search_cloudflare/index.ts','utf8')
+            process.stdout.write((s.match(/version: '([^']*)'/) || [,''])[1])
+          ")
+          if [ "$pkg" != "$mod" ]; then
+            echo "::error::package.json is $pkg but module metadata is $mod"
+            exit 1
+          fi
+          echo "version $pkg consistent"
+
       # The published tarball must contain BOTH src/ and dist/. Consumers import
       # from dist/, but `mercato module add` reads module identity and the
       # `ejectable` flag by parsing src/modules/<id>/index.ts as text, so a

@@ -1,14 +1,28 @@
 name: Publish
 
 on:
-  push:
-    tags: ['v*']
+  # PRIMARY PATH. Run this from the Actions tab; CI does the version bump, the
+  # commit, the tag and the publish. Nothing is released from a laptop, and the
+  # released artifact is always one a green runner built.
   workflow_dispatch:
     inputs:
-      tag:
+      release:
+        description: 'patch | minor | major | explicit version (0.2.0) | none (publish package.json as-is)'
+        required: true
+        default: 'patch'
+      dist_tag:
         description: 'npm dist-tag (latest, next, preview)'
         required: false
         default: 'latest'
+      dry_run:
+        description: 'Run every gate but publish nothing. Does NOT validate npm auth.'
+        type: boolean
+        default: false
+
+  # Kept for anyone who still prefers tagging. Same gates, no bump — the tag is
+  # the source of truth and must already match package.json.
+  push:
+    tags: ['v*']
 
 concurrency:
   group: publish
@@ -18,7 +32,9 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      # `write` because the dispatch path commits the version bump and pushes
+      # the tag. The tag-push path only reads, but permissions are per-job.
+      contents: write
       # Load-bearing twice over: it is what lets the runner mint the OIDC token
       # that AUTHENTICATES this publish (npm trusted publishing — there is no
       # NPM_TOKEN anywhere in this repo), and what `--provenance` needs to sign
@@ -26,6 +42,10 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Tags are needed to detect an already-released version, and the
+          # default shallow clone omits them.
+          fetch-depth: 0
 
       # Must precede setup-node — see the same step in ci.yml for why.
       - name: Enable Corepack
@@ -40,8 +60,66 @@ jobs:
       - name: Install
         run: yarn install --immutable
 
-      # Gate the publish on the same checks CI runs. A tag push should never be
-      # able to ship something that would have failed on a branch.
+      # ── Resolve the version BEFORE the gates, so a bad input fails fast ──
+      #
+      # `npm version --no-git-tag-version` only rewrites package.json; the
+      # commit and tag are made explicitly below, after the publish succeeds.
+      - name: Resolve version
+        id: version
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "mode=tag" >> "$GITHUB_OUTPUT"
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ inputs.release }}" = "none" ]; then
+            echo "mode=asis" >> "$GITHUB_OUTPUT"
+            echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+          else
+            npm version "${{ inputs.release }}" --no-git-tag-version >/dev/null
+            echo "mode=bump" >> "$GITHUB_OUTPUT"
+            echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ModuleInfo.version is a literal that `mercato module add` reads by
+      # parsing the file as text, so it cannot derive itself from package.json
+      # and silently drifts. Sync it here; ci.yml asserts the two match.
+      - name: Sync module metadata version
+        run: |
+          set -euo pipefail
+          node -e "
+            const fs = require('fs')
+            const f = 'src/modules/search_cloudflare/index.ts'
+            const want = '${{ steps.version.outputs.version }}'
+            const before = fs.readFileSync(f, 'utf8')
+            const after = before.replace(/version: '[^']*'/, \"version: '\" + want + \"'\")
+            if (after !== before) { fs.writeFileSync(f, after); console.log('synced to ' + want) }
+          "
+
+      # The tag is the source of truth on the tag-push path. A mismatch produces
+      # a release whose git history cannot be located from npm.
+      - name: Verify tag matches package version
+        if: steps.version.outputs.mode == 'tag'
+        run: |
+          set -euo pipefail
+          pkg_version=$(node -p "require('./package.json').version")
+          if [ "${{ steps.version.outputs.version }}" != "$pkg_version" ]; then
+            echo "::error::tag v${{ steps.version.outputs.version }} does not match package.json $pkg_version"
+            exit 1
+          fi
+
+      # Releasing a version whose tag already exists means one of them is a lie
+      # about what shipped. --tolerate-republish would happily hide it.
+      - name: Refuse to reuse an existing tag
+        if: steps.version.outputs.mode == 'bump'
+        run: |
+          set -euo pipefail
+          if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+            echo "::error::tag v${{ steps.version.outputs.version }} already exists"
+            exit 1
+          fi
+
+      # Same gates CI runs. A release must never ship something that would have
+      # failed on a branch.
       - name: Typecheck
         run: yarn typecheck
 
@@ -51,19 +129,15 @@ jobs:
       - name: Build
         run: yarn build
 
-      # The tag is the source of truth for the released version. A mismatch
-      # between the tag and package.json produces a release whose git history
-      # cannot be located from npm, so fail loudly rather than publishing it.
-      - name: Verify tag matches package version
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Summary
         run: |
-          set -euo pipefail
-          tag_version="${GITHUB_REF_NAME#v}"
-          pkg_version=$(node -p "require('./package.json').version")
-          if [ "$tag_version" != "$pkg_version" ]; then
-            echo "::error::tag v$tag_version does not match package.json $pkg_version"
-            exit 1
-          fi
+          {
+            echo "### ${{ steps.version.outputs.version }}"
+            echo ""
+            echo "- mode: \`${{ steps.version.outputs.mode }}\`"
+            echo "- dist-tag: \`${{ inputs.dist_tag || 'latest' }}\`"
+            echo "- dry run: \`${{ inputs.dry_run || false }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # ── Authentication: npm trusted publishing (OIDC). No token. ──
       #
@@ -89,19 +163,45 @@ jobs:
       # --access public is explicit even though package.json sets
       # publishConfig.access: Yarn documents that scoped packages default to
       # `restricted` "for legacy reasons", and that would fail HERE, after every
-      # other gate has passed and the tag is already pushed.
+      # other gate has passed.
       #
       # --tolerate-republish makes re-running a tag a no-op instead of an error.
       # It also covers the bootstrap: the registry requires a package to EXIST
-      # before a trusted publisher can be attached, so 0.1.0 has to be published
-      # once from a laptop (`npm login`, then `yarn npm publish --access
-      # public`). Only after that can this workflow authenticate via OIDC — and
-      # re-running the v0.1.0 tag then becomes a no-op rather than a permanent
-      # failure.
+      # before a trusted publisher can be attached, so the very first version
+      # has to be published once from a laptop. Only after that can this
+      # workflow authenticate via OIDC.
       - name: Publish
+        if: ${{ !inputs.dry_run }}
         run: |
           yarn npm publish \
             --access public \
-            --tag "${{ inputs.tag || 'latest' }}" \
+            --tag "${{ inputs.dist_tag || 'latest' }}" \
             --tolerate-republish \
             --provenance
+
+      # Dry run stops short of the registry. It proves the gates and the tarball
+      # shape, NOT that OIDC auth works — only a real publish proves that.
+      - name: Dry run — pack instead of publish
+        if: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          yarn pack --out /tmp/package.tgz
+          tar -tzf /tmp/package.tgz | sed 's/^/  /'
+          echo "dry run: nothing was published"
+
+      # Only after a successful publish. A failure above leaves the repository
+      # untouched, so a retry starts from a clean state rather than tripping the
+      # existing-tag guard.
+      - name: Commit and tag the release
+        if: ${{ steps.version.outputs.mode == 'bump' && !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json src/modules/search_cloudflare/index.ts
+          git commit -m "release: v${{ steps.version.outputs.version }}"
+          git tag "v${{ steps.version.outputs.version }}"
+          # Push the tag first: if the branch push races with another commit,
+          # the tag still points at exactly what was published.
+          git push origin "v${{ steps.version.outputs.version }}"
+          git push origin "HEAD:${{ github.ref_name }}"
