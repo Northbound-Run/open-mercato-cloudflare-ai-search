@@ -82,12 +82,77 @@ export async function register(container: AppContainer) {
 
 **This cannot be a module `di.ts`.** Open Mercato registers module DI at step 2 of container creation and `searchService` only exists after core bootstrap at step 3 — and step 2 swallows throws, so the failure mode would be silent. The app's own `src/di.ts` runs at step 4, which is the first point where the strategy can be added. See the comment block in `src/register.ts`.
 
-### 5. Verify
+### 5. Enable the module (optional, for diagnostics)
+
+The driver works without this. Enabling the module adds
+`yarn mercato search_cloudflare_ai doctor`, which is the only thing that
+verifies the assumptions in [Cross-tenant safety](#cross-tenant-safety) still
+hold against your live instance.
+
+```ts
+// src/modules.ts
+{ id: 'search_cloudflare_ai', from: '@northbound-run/search-cloudflare-ai' },
+```
+
+Then `yarn generate`. The module ships no entities, migrations, routes or UI —
+only the CLI. It declares `requires: ['search']`.
+
+### 6. Verify
 
 ```bash
+yarn mercato search_cloudflare_ai doctor
 yarn mercato search status         # expect: Full-Text Search (fulltext)  AVAILABLE
 yarn mercato search reindex --tenant <tenantId> --purgeFirst
 yarn mercato search query -q "freight invoice" --tenant <tenantId> --strategy fulltext
+```
+
+---
+
+## Diagnostics
+
+```bash
+yarn mercato search_cloudflare_ai doctor           # full, includes the live probe
+yarn mercato search_cloudflare_ai doctor --quick   # config checks only
+```
+
+Checks, in order:
+
+| Check | Fails when |
+| --- | --- |
+| Environment configured | any `CF_AI_SEARCH_*` variable is missing — the driver silently does not register without them |
+| Instance exists | no such instance, or the API token is wrong/expired (warns if indexing is paused) |
+| Custom metadata schema | `entity` or `org` is undeclared or the wrong type — Cloudflare **silently drops** undeclared fields, and a hit without `entity` cannot be mapped to an Open Mercato entity |
+| Hybrid retrieval | *(warn)* keyword or vector indexing is off |
+| Driver registered | no `fulltext` strategy in the container — i.e. the app forgot the wiring in step 4, which is otherwise completely silent |
+| Cross-tenant isolation | a planted canary from a second synthetic tenant came back. **This is the check the command exists for.** |
+| Range-filter bug | *(warn)* reports whether the upstream Cloudflare bug is still present |
+
+Exits non-zero on any failure, so it works as a deploy gate.
+
+The isolation probe indexes two canary documents under synthetic tenants
+(`__om-doctor-a` / `__om-doctor-b`), queries them, and deletes them in a
+`finally`. It writes to your real index, so the command says so before it
+starts. Expect it to take a minute or two — Cloudflare indexing is
+asynchronous and was measured at 36–90s even for tiny documents. `--quick`
+skips it.
+
+Sample output from a healthy instance:
+
+```
+  ✓ Environment configured
+      all three variables present
+  ✓ Instance exists
+      "my-instance" (status: ready, namespace: default)
+  ✓ Custom metadata schema
+      entity:text, org:text declared
+  ✓ Hybrid retrieval enabled
+      vector + keyword (tokenizer: porter)
+  ✓ Driver registered with SearchService
+      fulltext -> cloudflare-ai-search
+  ✓ Cross-tenant isolation (live)
+      canary stayed in its own tenant (indexed in 50s)
+  ! Cloudflare range-filter bug
+      still present — BM25 ignores $gte/$lt on `folder`
 ```
 
 ---
@@ -109,7 +174,9 @@ This is not an exotic filter shape. It is the one Cloudflare's own docs prescrib
 
 **How this driver avoids it.** Item keys are exactly one folder level deep — `t/{tenantId}/{recordId}.md` — so tenant scoping is a plain `$eq` and the broken operator is never used. Custom metadata filters (`entity`, `org`) were verified correct on all three retrieval types.
 
-If you fork this driver, **do not nest the key scheme** without re-running `yarn spike`. There is a unit test asserting the tenant filter carries `$eq` and no `$gte`/`$lt`, and the live harness plants the canary.
+If you fork this driver, **do not nest the key scheme**. There is a unit test asserting the tenant filter carries `$eq` and no `$gte`/`$lt`, and two live checks that plant a canary: `yarn spike` during development, and `yarn mercato search_cloudflare_ai doctor` against a deployed instance.
+
+Because this is a beta product, "we measured it once" is not durable. `doctor` re-measures it on demand and reports separately on whether the upstream bug is still present — so if Cloudflare fixes it, you will see that too, and nested key schemes become available again.
 
 ---
 

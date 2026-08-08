@@ -42,19 +42,22 @@ jobs:
         run: yarn build
 
       # The published tarball must contain BOTH src/ and dist/. Consumers import
-      # from dist/, but `mercato module add` reads module identity by parsing
-      # src/ as text, so a dist-only package silently fails to install. Assert
-      # the shape here rather than discovering it after publish.
+      # from dist/, but `mercato module add` reads module identity and the
+      # `ejectable` flag by parsing src/modules/<id>/index.ts as text, so a
+      # dist-only package silently fails to install. Assert the shape here
+      # rather than discovering it after publish.
       - name: Assert package contents
         run: |
           set -euo pipefail
           yarn pack --out /tmp/package.tgz
           contents=$(tar -tzf /tmp/package.tgz)
           for required in \
-            "package/src/index.ts" \
+            "package/src/modules/search_cloudflare_ai/index.ts" \
+            "package/src/modules/search_cloudflare_ai/cli.ts" \
             "package/src/register.ts" \
             "package/src/lib/driver.ts" \
-            "package/dist/index.js" \
+            "package/dist/modules/search_cloudflare_ai/index.js" \
+            "package/dist/modules/search_cloudflare_ai/cli.js" \
             "package/dist/register.js" \
             "package/dist/lib/driver.js"
           do
@@ -118,22 +121,35 @@ jobs:
           done
           echo "tarball hygiene OK"
 
-      # The driver must load under raw Node ESM from dist/ — that is how the
-      # consuming app, the CLI and the migrations all reach it. A bad relative
-      # specifier in the build output only shows up here.
-      - name: Assert driver loads from dist
+      # Everything must load under raw Node ESM from dist/ — that is how the
+      # consuming app and the mercato CLI reach it. A bad relative specifier in
+      # the build output only shows up here.
+      - name: Assert dist loads and contracts hold
         run: |
           set -euo pipefail
           node --input-type=module -e "
-            const { createAiSearchDriver } = await import('./dist/index.js')
-            const driver = createAiSearchDriver({
-              accountId: 'a', apiToken: 'b', instanceId: 'c',
-            })
+            const { createAiSearchDriver } = await import('./dist/lib/driver.js')
+            const driver = createAiSearchDriver({ accountId: 'a', apiToken: 'b', instanceId: 'c' })
             if (driver.id !== 'cloudflare-ai-search') throw new Error('driver id drifted')
             for (const method of ['ensureReady','isHealthy','search','index','delete']) {
               if (typeof driver[method] !== 'function') {
                 throw new Error('FullTextSearchDriver contract broken: missing ' + method)
               }
             }
-            console.log('driver loads cleanly from dist')
+
+            // The entry point must stay metadata-only: importing it must not
+            // drag in the driver, the CLI, or @open-mercato/search.
+            const entry = await import('./dist/index.js')
+            if (entry.metadata?.name !== 'search_cloudflare_ai') throw new Error('module metadata drifted')
+            if ('createAiSearchDriver' in entry) {
+              throw new Error('index.ts must re-export metadata only — see its header')
+            }
+
+            // The CLI is what operators reach for; a broken import here is only
+            // discovered when someone is already debugging something else.
+            const cli = (await import('./dist/modules/search_cloudflare_ai/cli.js')).default
+            const commands = cli.map((c) => c.command).sort()
+            if (!commands.includes('doctor')) throw new Error('doctor command missing: ' + commands)
+
+            console.log('dist loads cleanly; commands: ' + commands.join(', '))
           "

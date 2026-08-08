@@ -1,32 +1,20 @@
 /**
- * Package entry point.
+ * Package entry point — module metadata ONLY.
  *
- * v0.1.0 ships library code only — no Open Mercato module, no entities, no
- * migrations, no UI. The dependency graph reachable from here is deliberately
- * tiny: `fetchWithTimeout` and `lib/field-policy` are both leaf modules, so
- * importing this package does not drag kysely, meilisearch or the ai-sdk
- * providers into a consumer's bundle.
+ * `mercato module add` reads module identity and the `ejectable` flag by parsing
+ * `src/modules/search_cloudflare_ai/index.ts` as text, so nothing here needs to
+ * pull in the driver — and pulling it in would drag the dependency graph into
+ * any consumer that merely inspects the package.
  *
- * `registerCloudflareAiSearch` is intentionally NOT re-exported here. It is
- * reached at `@northbound-run/search-cloudflare-ai/register` so that the DI
- * wiring — the only part that touches `@open-mercato/search`'s heavier
- * strategy and DI modules — is loaded only by the app file that actually wires
- * it. Same split as `channel-cloudflare-email`'s `/inbox-bridge`.
+ * Everything else is reached by subpath, so a consumer loads only what it uses:
  *
- * When the operability module lands (CLI provision/doctor/stats), this file
- * narrows to a metadata-only re-export, because `mercato module add` parses
- * `src/modules/<id>/index.ts` as text and must not need to evaluate the package.
+ *   @northbound-run/search-cloudflare-ai/register     registerCloudflareAiSearch()
+ *   @northbound-run/search-cloudflare-ai/lib/driver   createAiSearchDriver()
+ *   @northbound-run/search-cloudflare-ai/lib/client   AiSearchClient
+ *   @northbound-run/search-cloudflare-ai/lib/doctor   runDoctor() and its checks
+ *
+ * This matters most for `/register`, which is the only file that imports
+ * `@open-mercato/search`'s strategy and DI modules — and those pull in kysely,
+ * meilisearch and the ai-sdk providers.
  */
-
-export { AiSearchClient, AiSearchApiError } from './lib/client'
-export type {
-  AiSearchClientConfig,
-  AiSearchChunk,
-  AiSearchItem,
-  AiSearchRetrievalFilters,
-  AiSearchRetrievalOptions,
-  AiSearchSearchResponse,
-} from './lib/client'
-
-export { createAiSearchDriver, createAiSearchDriverFromEnv } from './lib/driver'
-export type { AiSearchDriverOptions, EncryptionMapEntry } from './lib/driver'
+export { metadata } from './modules/search_cloudflare_ai/index'

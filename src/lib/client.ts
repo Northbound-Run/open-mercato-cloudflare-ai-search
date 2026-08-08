@@ -98,6 +98,25 @@ export type AiSearchItem = {
   last_seen_at?: string
 }
 
+/**
+ * Instance configuration, as returned by GET on the instance path. Only the
+ * fields `doctor` inspects are typed; the payload carries considerably more.
+ */
+export type AiSearchInstance = {
+  id?: string
+  namespace?: string
+  status?: string
+  paused?: boolean
+  index_method?: { vector?: boolean; keyword?: boolean } | null
+  hybrid_search_enabled?: boolean
+  custom_metadata?: Array<{ field_name?: string; data_type?: string }> | null
+  indexing_options?: { keyword_tokenizer?: string } | null
+  retrieval_options?: { keyword_match_mode?: string } | null
+  score_threshold?: number
+  max_num_results?: number
+  embedding_model?: string
+}
+
 type CloudflareEnvelope<T> = {
   success?: boolean
   errors?: Array<{ code?: number; message?: string }>
@@ -172,6 +191,19 @@ export class AiSearchClient {
       return { result: envelope.result as T, resultInfo: envelope.result_info ?? null }
     }
     return { result: parsed as T, resultInfo: null }
+  }
+
+  // -- Instance -------------------------------------------------------------
+
+  /** Read the live instance configuration. Returns null when it does not exist. */
+  async getInstance(): Promise<AiSearchInstance | null> {
+    try {
+      const { result } = await this.request<AiSearchInstance>(this.instancePath())
+      return result ?? null
+    } catch (error) {
+      if (error instanceof AiSearchApiError && error.status === 404) return null
+      throw error
+    }
   }
 
   // -- Search ---------------------------------------------------------------
