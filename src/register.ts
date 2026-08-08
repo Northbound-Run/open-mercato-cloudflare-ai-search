@@ -20,7 +20,7 @@
  *
  * Hence: one line in the app's own `src/di.ts`, which runs at step 4.
  *
- *   import { registerCloudflareAiSearch } from '@northbound-run/search-cloudflare-ai/register'
+ *   import { registerCloudflareAiSearch } from '@northbound-run/search-cloudflare/register'
  *
  *   export async function register(container: AppContainer) {
  *     await bootstrap(container)

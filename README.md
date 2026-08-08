@@ -1,4 +1,4 @@
-# @northbound-run/search-cloudflare-ai
+# @northbound-run/search-cloudflare
 
 Cloudflare AI Search as a pluggable **fulltext driver** for [Open Mercato](https://docs.openmercato.com) — hybrid BM25 + vector retrieval behind the stock `FullTextSearchDriver` contract, with no search service to operate.
 
@@ -33,7 +33,7 @@ See [Cross-tenant safety](#cross-tenant-safety). It is handled, but you should u
 ## Install
 
 ```bash
-yarn add @northbound-run/search-cloudflare-ai
+yarn add @northbound-run/search-cloudflare
 ```
 
 Peer dependencies: `@open-mercato/search` and `@open-mercato/shared` (0.6.x).
@@ -72,7 +72,7 @@ CF_AI_SEARCH_MATCH_THRESHOLD=0.3          # Cloudflare default is 0.4
 
 ```ts
 // src/di.ts
-import { registerCloudflareAiSearch } from '@northbound-run/search-cloudflare-ai/register'
+import { registerCloudflareAiSearch } from '@northbound-run/search-cloudflare/register'
 
 export async function register(container: AppContainer) {
   await bootstrap(container)
@@ -85,13 +85,13 @@ export async function register(container: AppContainer) {
 ### 5. Enable the module (optional, for diagnostics)
 
 The driver works without this. Enabling the module adds
-`yarn mercato search_cloudflare_ai doctor`, which is the only thing that
+`yarn mercato search_cloudflare doctor`, which is the only thing that
 verifies the assumptions in [Cross-tenant safety](#cross-tenant-safety) still
 hold against your live instance.
 
 ```ts
 // src/modules.ts
-{ id: 'search_cloudflare_ai', from: '@northbound-run/search-cloudflare-ai' },
+{ id: 'search_cloudflare', from: '@northbound-run/search-cloudflare' },
 ```
 
 Then `yarn generate`. The module ships no entities, migrations, routes or UI —
@@ -100,7 +100,7 @@ only the CLI. It declares `requires: ['search']`.
 ### 6. Verify
 
 ```bash
-yarn mercato search_cloudflare_ai doctor
+yarn mercato search_cloudflare doctor
 yarn mercato search status         # expect: Full-Text Search (fulltext)  AVAILABLE
 yarn mercato search reindex --tenant <tenantId> --purgeFirst
 yarn mercato search query -q "freight invoice" --tenant <tenantId> --strategy fulltext
@@ -111,8 +111,8 @@ yarn mercato search query -q "freight invoice" --tenant <tenantId> --strategy fu
 ## Diagnostics
 
 ```bash
-yarn mercato search_cloudflare_ai doctor           # full, includes the live probe
-yarn mercato search_cloudflare_ai doctor --quick   # config checks only
+yarn mercato search_cloudflare doctor           # full, includes the live probe
+yarn mercato search_cloudflare doctor --quick   # config checks only
 ```
 
 Checks, in order:
@@ -174,7 +174,7 @@ This is not an exotic filter shape. It is the one Cloudflare's own docs prescrib
 
 **How this driver avoids it.** Item keys are exactly one folder level deep — `t/{tenantId}/{recordId}.md` — so tenant scoping is a plain `$eq` and the broken operator is never used. Custom metadata filters (`entity`, `org`) were verified correct on all three retrieval types.
 
-If you fork this driver, **do not nest the key scheme**. There is a unit test asserting the tenant filter carries `$eq` and no `$gte`/`$lt`, and two live checks that plant a canary: `yarn spike` during development, and `yarn mercato search_cloudflare_ai doctor` against a deployed instance.
+If you fork this driver, **do not nest the key scheme**. There is a unit test asserting the tenant filter carries `$eq` and no `$gte`/`$lt`, and two live checks that plant a canary: `yarn spike` during development, and `yarn mercato search_cloudflare doctor` against a deployed instance.
 
 Because this is a beta product, "we measured it once" is not durable. `doctor` re-measures it on demand and reports separately on whether the upstream bug is still present — so if Cloudflare fixes it, you will see that too, and nested key schemes become available again.
 

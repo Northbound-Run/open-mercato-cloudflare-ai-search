@@ -296,7 +296,7 @@ export function summarize(checks: DoctorCheck[]): DoctorReport {
 // Live probe (the only networked part)
 // ---------------------------------------------------------------------------
 
-const PROBE_ENTITY = 'search_cloudflare_ai:doctor_canary' as EntityId
+const PROBE_ENTITY = 'search_cloudflare:doctor_canary' as EntityId
 const PROBE_TENANT_A = '__om-doctor-a'
 const PROBE_TENANT_B = '__om-doctor-b'
 

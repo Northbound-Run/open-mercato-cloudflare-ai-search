@@ -115,7 +115,7 @@ const doctorCli: ModuleCli = {
 const helpCli: ModuleCli = {
   command: 'help',
   async run() {
-    console.log('\nUsage: yarn mercato search_cloudflare_ai <command> [options]\n')
+    console.log('\nUsage: yarn mercato search_cloudflare <command> [options]\n')
     console.log('Commands:')
     console.log('  doctor        Verify the instance matches what the driver requires')
     console.log('  help          Show this message')

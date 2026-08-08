@@ -3066,9 +3066,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@northbound-run/search-cloudflare-ai@workspace:.":
+"@northbound-run/search-cloudflare@workspace:.":
   version: 0.0.0-use.local
-  resolution: "@northbound-run/search-cloudflare-ai@workspace:."
+  resolution: "@northbound-run/search-cloudflare@workspace:."
   dependencies:
     "@mikro-orm/core": "npm:^7.0.14"
     "@mikro-orm/postgresql": "npm:^7.0.14"

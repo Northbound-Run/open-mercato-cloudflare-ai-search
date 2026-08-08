@@ -1,4 +1,4 @@
-// Standalone esbuild build for @northbound-run/search-cloudflare-ai.
+// Standalone esbuild build for @northbound-run/search-cloudflare.
 //
 // Open Mercato monorepo packages build via a shared `scripts/build-package.mjs` that is not
 // published. This reproduces the same output contract for a standalone repo: transpile every

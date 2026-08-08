@@ -52,12 +52,12 @@ jobs:
           yarn pack --out /tmp/package.tgz
           contents=$(tar -tzf /tmp/package.tgz)
           for required in \
-            "package/src/modules/search_cloudflare_ai/index.ts" \
-            "package/src/modules/search_cloudflare_ai/cli.ts" \
+            "package/src/modules/search_cloudflare/index.ts" \
+            "package/src/modules/search_cloudflare/cli.ts" \
             "package/src/register.ts" \
             "package/src/lib/driver.ts" \
-            "package/dist/modules/search_cloudflare_ai/index.js" \
-            "package/dist/modules/search_cloudflare_ai/cli.js" \
+            "package/dist/modules/search_cloudflare/index.js" \
+            "package/dist/modules/search_cloudflare/cli.js" \
             "package/dist/register.js" \
             "package/dist/lib/driver.js"
           do
@@ -140,14 +140,14 @@ jobs:
             // The entry point must stay metadata-only: importing it must not
             // drag in the driver, the CLI, or @open-mercato/search.
             const entry = await import('./dist/index.js')
-            if (entry.metadata?.name !== 'search_cloudflare_ai') throw new Error('module metadata drifted')
+            if (entry.metadata?.name !== 'search_cloudflare') throw new Error('module metadata drifted')
             if ('createAiSearchDriver' in entry) {
               throw new Error('index.ts must re-export metadata only — see its header')
             }
 
             // The CLI is what operators reach for; a broken import here is only
             // discovered when someone is already debugging something else.
-            const cli = (await import('./dist/modules/search_cloudflare_ai/cli.js')).default
+            const cli = (await import('./dist/modules/search_cloudflare/cli.js')).default
             const commands = cli.map((c) => c.command).sort()
             if (!commands.includes('doctor')) throw new Error('doctor command missing: ' + commands)
 
