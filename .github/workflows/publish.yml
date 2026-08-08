@@ -193,15 +193,30 @@ jobs:
       # untouched, so a retry starts from a clean state rather than tripping the
       # existing-tag guard.
       - name: Commit and tag the release
-        if: ${{ steps.version.outputs.mode == 'bump' && !inputs.dry_run }}
+        if: ${{ steps.version.outputs.mode != 'tag' && !inputs.dry_run }}
         run: |
           set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json src/modules/search_cloudflare/index.ts
-          git commit -m "release: v${{ steps.version.outputs.version }}"
-          git tag "v${{ steps.version.outputs.version }}"
-          # Push the tag first: if the branch push races with another commit,
-          # the tag still points at exactly what was published.
-          git push origin "v${{ steps.version.outputs.version }}"
-          git push origin "HEAD:${{ github.ref_name }}"
+
+          # `bump` rewrote files that must be committed. `asis` published exactly
+          # what is already on the branch, so there is nothing to commit — but it
+          # still needs a tag, or a released version has no locatable history.
+          if [ "${{ steps.version.outputs.mode }}" = "bump" ]; then
+            git add package.json src/modules/search_cloudflare/index.ts
+            git commit -m "release: v$version"
+          fi
+
+          if git rev-parse "v$version" >/dev/null 2>&1; then
+            echo "tag v$version already exists — leaving it alone"
+          else
+            git tag "v$version"
+            # Push the tag first: if the branch push races with another commit,
+            # the tag still points at exactly what was published.
+            git push origin "v$version"
+          fi
+
+          if [ "${{ steps.version.outputs.mode }}" = "bump" ]; then
+            git push origin "HEAD:${{ github.ref_name }}"
+          fi
