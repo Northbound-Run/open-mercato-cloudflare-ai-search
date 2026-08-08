@@ -1,0 +1,107 @@
+name: Publish
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'npm dist-tag (latest, next, preview)'
+        required: false
+        default: 'latest'
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Load-bearing twice over: it is what lets the runner mint the OIDC token
+      # that AUTHENTICATES this publish (npm trusted publishing — there is no
+      # NPM_TOKEN anywhere in this repo), and what `--provenance` needs to sign
+      # the result. Remove it and the publish fails with ENEEDAUTH.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # Must precede setup-node — see the same step in ci.yml for why.
+      - name: Enable Corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: yarn
+          registry-url: https://registry.npmjs.org
+
+      - name: Install
+        run: yarn install --immutable
+
+      # Gate the publish on the same checks CI runs. A tag push should never be
+      # able to ship something that would have failed on a branch.
+      - name: Typecheck
+        run: yarn typecheck
+
+      - name: Test
+        run: yarn test
+
+      - name: Build
+        run: yarn build
+
+      # The tag is the source of truth for the released version. A mismatch
+      # between the tag and package.json produces a release whose git history
+      # cannot be located from npm, so fail loudly rather than publishing it.
+      - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          tag_version="${GITHUB_REF_NAME#v}"
+          pkg_version=$(node -p "require('./package.json').version")
+          if [ "$tag_version" != "$pkg_version" ]; then
+            echo "::error::tag v$tag_version does not match package.json $pkg_version"
+            exit 1
+          fi
+
+      # ── Authentication: npm trusted publishing (OIDC). No token. ──
+      #
+      # There is deliberately NO `env:` block here. The registry trusts this
+      # exact repo + workflow filename (`publish.yml`), so Yarn exchanges the
+      # runner's short-lived OIDC token for a single-use publish credential.
+      # Nothing long-lived exists to rotate, leak, or expire.
+      #
+      # Do NOT reintroduce NODE_AUTH_TOKEN / YARN_NPM_AUTH_TOKEN "just in case":
+      # when a token is present the CLI takes the legacy auth path INSTEAD of
+      # OIDC, which silently costs the trusted-publishing guarantee while still
+      # appearing to work.
+      #
+      # Three things must stay true or auth breaks:
+      #   - this file stays named publish.yml (the trust config pins the
+      #     filename, not the path)
+      #   - `npm publish` stays in THIS workflow, not a reusable/called one —
+      #     npm validates the calling workflow's identity
+      #   - the runner stays GitHub-hosted; self-hosted is not supported
+      # Yarn gained OIDC support in 4.10 (yarnpkg/berry#6898) with the scoped-
+      # package fix in #6911; this repo pins yarn 4.12.0.
+      #
+      # --access public is explicit even though package.json sets
+      # publishConfig.access: Yarn documents that scoped packages default to
+      # `restricted` "for legacy reasons", and that would fail HERE, after every
+      # other gate has passed and the tag is already pushed.
+      #
+      # --tolerate-republish makes re-running a tag a no-op instead of an error.
+      # It also covers the bootstrap: the registry requires a package to EXIST
+      # before a trusted publisher can be attached, so 0.1.0 has to be published
+      # once from a laptop (`npm login`, then `yarn npm publish --access
+      # public`). Only after that can this workflow authenticate via OIDC — and
+      # re-running the v0.1.0 tag then becomes a no-op rather than a permanent
+      # failure.
+      - name: Publish
+        run: |
+          yarn npm publish \
+            --access public \
+            --tag "${{ inputs.tag || 'latest' }}" \
+            --tolerate-republish \
+            --provenance

@@ -68,36 +68,27 @@ CF_AI_SEARCH_RETRIEVAL_TYPE=hybrid        # vector | keyword | hybrid
 CF_AI_SEARCH_MATCH_THRESHOLD=0.3          # Cloudflare default is 0.4
 ```
 
-### 4. One line of app wiring
-
-```ts
-// src/di.ts
-import { registerCloudflareAiSearch } from '@northbound-run/search-cloudflare/register'
-
-export async function register(container: AppContainer) {
-  await bootstrap(container)
-  registerCloudflareAiSearch(container)   // no-op unless CF_AI_SEARCH_* is set
-}
-```
-
-**This cannot be a module `di.ts`.** Open Mercato registers module DI at step 2 of container creation and `searchService` only exists after core bootstrap at step 3 — and step 2 swallows throws, so the failure mode would be silent. The app's own `src/di.ts` runs at step 4, which is the first point where the strategy can be added. See the comment block in `src/register.ts`.
-
-### 5. Enable the module (optional, for diagnostics)
-
-The driver works without this. Enabling the module adds
-`yarn mercato search_cloudflare doctor`, which is the only thing that
-verifies the assumptions in [Cross-tenant safety](#cross-tenant-safety) still
-hold against your live instance.
+### 4. Enable the module
 
 ```ts
 // src/modules.ts
 { id: 'search_cloudflare', from: '@northbound-run/search-cloudflare' },
 ```
 
-Then `yarn generate`. The module ships no entities, migrations, routes or UI —
-only the CLI. It declares `requires: ['search']`.
+Then `yarn generate`. That is the whole integration — no app `src/di.ts` wiring.
+The module ships no entities, migrations, routes or UI: a `di.ts` that registers
+the driver, and the `doctor` CLI. It declares `requires: ['search']`.
 
-### 6. Verify
+**Registration has to live in a module `di.ts`, not the app's.** Open Mercato
+reaches app-level DI through `await import('@/di')` — a bundler-only path alias
+that throws `ERR_MODULE_NOT_FOUND` under raw Node into a bare `catch {}`. So app
+DI silently never runs in the mercato CLI or in queue workers. Since indexing
+runs in workers spawned as CLI processes, a driver registered there would serve
+reads from Next while never writing anything. Module `di.ts` runs in every
+runtime. `src/register.ts` remains as a fallback for one narrow case — see its
+header.
+
+### 5. Verify
 
 ```bash
 yarn mercato search_cloudflare doctor
@@ -105,6 +96,28 @@ yarn mercato search status         # expect: Full-Text Search (fulltext)  AVAILA
 yarn mercato search reindex --tenant <tenantId> --purgeFirst
 yarn mercato search query -q "freight invoice" --tenant <tenantId> --strategy fulltext
 ```
+
+---
+
+## Status: 0.1.x is not yet usable end to end
+
+Reads work. **Indexing does not, on stock Open Mercato 0.6.x**, and `doctor`
+reports it as a failed check rather than letting you discover it later.
+
+Field policies — the per-entity whitelists that keep `ssn`, `government_id`,
+`date_of_birth` and `tax_id` out of any index — live in a registry populated by
+**app** bootstrap, which the mercato CLI does not load for the same reason it
+does not load app DI. In CLI and worker processes that registry is empty, so:
+
+- this driver **fails closed** and indexes documents with no content;
+- the built-in Meilisearch driver **fails open** — with no whitelist it indexes
+  every field, excluded ones included. That is an upstream bug in the runtime
+  that does the actual indexing, and it is not caused by this package.
+
+Until the configs are visible in the CLI, either index from the Next runtime
+(`AUTO_SPAWN_WORKERS=false`, giving up background reindex) or carry the configs
+into the CLI registry upstream. `doctor`'s `field-policies` check tells you
+which situation you are in.
 
 ---
 
