@@ -178,6 +178,43 @@ export function checkIndexMethod(instance: AiSearchInstance): DoctorCheck {
 }
 
 /**
+ * Field policies decide which columns may be indexed at all — they are what
+ * keeps `ssn`, `government_id`, `date_of_birth` and `tax_id` out. They live in
+ * a global registry populated by APP bootstrap, which (like app DI) is not
+ * reachable from the mercato CLI, so in CLI and queue-worker processes the
+ * registry can be empty.
+ *
+ * When it is empty there is no safe behaviour, only two bad ones:
+ *   - the built-in Meilisearch driver gets `undefined` per entity, which means
+ *     "no whitelist", and indexes EVERY field including the excluded ones;
+ *   - this driver fails closed and indexes nothing, so documents arrive empty
+ *     and search silently returns nothing useful.
+ *
+ * Both are silent. This check makes the condition loud.
+ */
+export function checkFieldPolicies(entityCount: number): DoctorCheck {
+  if (entityCount === 0) {
+    return {
+      id: 'field-policies',
+      title: 'Search field policies loaded',
+      status: 'fail',
+      detail: 'no search field policies are visible in this runtime',
+      remedy:
+        'Documents will index empty (this driver fails closed rather than shipping excluded ' +
+        'fields). getSearchModuleConfigs() is populated by app bootstrap, which the mercato CLI ' +
+        'does not load. Run indexing from a runtime that does, or carry the configs into the CLI ' +
+        'registry upstream.',
+    }
+  }
+  return {
+    id: 'field-policies',
+    title: 'Search field policies loaded',
+    status: 'pass',
+    detail: `${entityCount} searchable entit${entityCount === 1 ? 'y' : 'ies'} configured`,
+  }
+}
+
+/**
  * Catches the single most likely deployment mistake: forgetting the one line of
  * app wiring. Without it the driver never registers and search silently falls
  * back to whatever other strategies exist, with nothing in the logs.
@@ -441,6 +478,8 @@ export async function runDoctor(deps: {
   client: AiSearchClient
   driver: FullTextSearchDriver
   strategy: { registered: boolean; driverId?: string | null }
+  /** Number of entities with a search config visible in THIS runtime. */
+  searchableEntityCount: number
   probe: boolean
   runId: string
   onProgress?: (message: string) => void
@@ -475,6 +514,7 @@ export async function runDoctor(deps: {
   checks.push(checkCustomMetadata(instance))
   checks.push(checkIndexMethod(instance))
   checks.push(checkStrategyRegistration(deps.strategy))
+  checks.push(checkFieldPolicies(deps.searchableEntityCount))
 
   if (!deps.probe) {
     checks.push(...interpretProbe({ ...emptyProbe, skipReason: 'skipped (--quick)' }))

@@ -2,6 +2,7 @@ import type { ModuleCli } from '@open-mercato/shared/modules/registry'
 import { createRequestContainer } from '@open-mercato/shared/lib/di/container'
 import { AiSearchClient } from '../../lib/client'
 import { createAiSearchDriverFromEnv } from '../../lib/driver'
+import { getSearchModuleConfigs } from '@open-mercato/shared/modules/search'
 import { runDoctor, type DoctorCheck, type DoctorReport } from '../../lib/doctor'
 
 const SYMBOL: Record<DoctorCheck['status'], string> = {
@@ -100,6 +101,12 @@ const doctorCli: ModuleCli = {
       // Only reached when config passed, at which point the driver is non-null.
       driver: driver!,
       strategy: await readStrategyRegistration(),
+      // Deliberately read in THIS process: the whole point is to report what
+      // the current runtime can see, which differs between Next and the CLI.
+      searchableEntityCount: (getSearchModuleConfigs() ?? []).reduce(
+        (n, m) => n + (m.entities ?? []).filter((e) => e.enabled !== false).length,
+        0,
+      ),
       probe: !quick && driver !== null,
       runId: Date.now().toString(36),
       onProgress: (message) => console.log(`      ${message}`),

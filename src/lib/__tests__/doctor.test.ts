@@ -5,6 +5,7 @@ import { describe, expect, it } from '@jest/globals'
 import type { AiSearchInstance } from '../client'
 import {
   checkConfiguration,
+  checkFieldPolicies,
   checkCustomMetadata,
   checkIndexMethod,
   checkInstanceReachable,
@@ -147,6 +148,27 @@ describe('strategy registration', () => {
 
   it('passes when this driver is registered', () => {
     expect(statusOf(checkStrategyRegistration({ registered: true, driverId: 'cloudflare-ai-search' }))).toBe('pass')
+  })
+})
+
+describe('field policies', () => {
+  it('fails when no policies are visible in this runtime', () => {
+    // Empty means no whitelist. The built-in driver would then index every
+    // field including ssn/government_id; this driver indexes nothing. Both are
+    // silent, so the check has to be loud.
+    const check = checkFieldPolicies(0)
+    expect(check.status).toBe('fail')
+    expect(check.remedy).toMatch(/app bootstrap/)
+  })
+
+  it('passes and reports the count', () => {
+    const check = checkFieldPolicies(12)
+    expect(check.status).toBe('pass')
+    expect(check.detail).toContain('12 searchable entities')
+  })
+
+  it('uses singular phrasing for one entity', () => {
+    expect(checkFieldPolicies(1).detail).toContain('1 searchable entity')
   })
 })
 

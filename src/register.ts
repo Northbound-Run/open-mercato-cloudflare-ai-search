@@ -1,7 +1,18 @@
 /**
- * DI wiring for the Cloudflare AI Search fulltext driver.
+ * FALLBACK DI wiring. Most apps should NOT call this.
  *
- * ── Why the consuming app must call this, and a module `di.ts` cannot ───────
+ * The supported path is the module's own `di.ts`, which registers the driver in
+ * every runtime — Next, the mercato CLI, and queue workers. Enable the
+ * `search_cloudflare` module and you are done.
+ *
+ * This function exists for one case: an app running with
+ * SEARCH_EXCLUDE_ENCRYPTED_FIELDS=true, where `registerSearchModule` refuses to
+ * consult its memoized-driver key and the module `di.ts` route cannot work. It
+ * buys encryption-map filtering at the cost of being Next-only — the CLI and
+ * queue workers will NOT index, so the index stays empty. Understand that trade
+ * before reaching for it.
+ *
+ * ── Why an app-level hook is needed at all, and what it cannot do ───────────
  *
  * `createRequestContainer` (@open-mercato/shared/src/lib/di/container.ts)
  * registers in this order:
