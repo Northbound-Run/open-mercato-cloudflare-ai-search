@@ -1,14 +1,38 @@
 # Changelog
 
+## 0.1.1
+
+Documentation correction. No code changes.
+
+0.1.0's README claimed the package was "not usable end to end" because field
+policies were not visible in the mercato CLI runtime. **That was wrong**, and
+the diagnosis behind it was wrong too — it was an artifact of how the package
+was being tested, not a defect in the package or in Open Mercato.
+
+Under `portal:` / `yarn link`, Node resolves `@open-mercato/shared` from the
+linked package's own `node_modules` instead of the app's, creating a second
+module instance whose module-level registries are empty. `getSearchModuleConfigs()`
+returned nothing, the field-policy resolver correctly failed closed, and every
+document indexed empty.
+
+Installed normally from the registry it works. Verified against Open Mercato
+0.6.6 on 2026-08-08: a real `inbox_ops:inbox_proposal` indexed through `mercato
+search index` reached Cloudflare with `fieldPolicy` correctly applied
+(`summary` + `category` indexed, `metadata` + `participants` excluded), and
+returned for natural-language, exact-identifier and vendor-name queries.
+
+The README now warns against link-based testing, and `doctor`'s `field-policies`
+check — added in 0.1.0 and the thing that surfaced this — is documented as the
+way to detect it.
+
 ## 0.1.0
 
 First release. Cloudflare AI Search behind Open Mercato's stock
 `FullTextSearchDriver` contract, so `SearchService` fuses it with the `vector`
 and `tokens` strategies exactly as it does Meilisearch.
 
-**Not yet usable end to end** — see "Status" in the README. Reads work;
-indexing is blocked by field-policy configs not being visible in the mercato
-CLI runtime, which `doctor` reports as a failed check.
+Note: this version's README wrongly stated the package was not usable end to
+end. See 0.1.1.
 
 ### Added
 

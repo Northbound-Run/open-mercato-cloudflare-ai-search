@@ -29,7 +29,7 @@ export const metadata: ModuleInfo = {
   title: 'Cloudflare AI Search',
   description:
     'Cloudflare AI Search as a fulltext search driver: hybrid BM25 + vector retrieval behind the stock FullTextSearchDriver contract, with diagnostics for the instance configuration it depends on.',
-  version: '0.1.0',
+  version: '0.1.1',
   author: 'Northbound',
   license: 'MIT',
   requires: ['search'],

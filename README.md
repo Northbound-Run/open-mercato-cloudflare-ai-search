@@ -99,25 +99,32 @@ yarn mercato search query -q "freight invoice" --tenant <tenantId> --strategy fu
 
 ---
 
-## Status: 0.1.x is not yet usable end to end
+## Do not test this package with `portal:` or `yarn link`
 
-Reads work. **Indexing does not, on stock Open Mercato 0.6.x**, and `doctor`
-reports it as a failed check rather than letting you discover it later.
+Verified end to end against Open Mercato 0.6.6 on 2026-08-08: a real record
+indexed through `mercato search index` reached Cloudflare with its field policy
+correctly applied, and came back for natural-language, exact-identifier and
+vendor-name queries.
 
-Field policies — the per-entity whitelists that keep `ssn`, `government_id`,
-`date_of_birth` and `tax_id` out of any index — live in a registry populated by
-**app** bootstrap, which the mercato CLI does not load for the same reason it
-does not load app DI. In CLI and worker processes that registry is empty, so:
+That only holds when the package is installed **normally**. Under `portal:` or
+`yarn link`, Node resolves `@open-mercato/shared` from the linked package's own
+`node_modules` rather than the app's, producing a *second module instance* whose
+module-level registries are empty. `getSearchModuleConfigs()` then returns
+nothing, this driver's field-policy resolver fails closed, and every document
+indexes empty — which looks exactly like a bug in the driver and is not one.
 
-- this driver **fails closed** and indexes documents with no content;
-- the built-in Meilisearch driver **fails open** — with no whitelist it indexes
-  every field, excluded ones included. That is an upstream bug in the runtime
-  that does the actual indexing, and it is not caused by this package.
+`doctor`'s `field-policies` check exists to catch that state:
 
-Until the configs are visible in the CLI, either index from the Next runtime
-(`AUTO_SPAWN_WORKERS=false`, giving up background reindex) or carry the configs
-into the CLI registry upstream. `doctor`'s `field-policies` check tells you
-which situation you are in.
+```
+✗ Search field policies loaded          <- linked copy, duplicate module instance
+      no search field policies are visible in this runtime
+
+✓ Search field policies loaded          <- installed normally
+      8 searchable entities configured
+```
+
+Anything reading a module-level global from `@open-mercato/*` has the same
+hazard. Test against a published version or a `yarn pack` tarball, not a link.
 
 ---
 
@@ -136,7 +143,8 @@ Checks, in order:
 | Instance exists | no such instance, or the API token is wrong/expired (warns if indexing is paused) |
 | Custom metadata schema | `entity` or `org` is undeclared or the wrong type — Cloudflare **silently drops** undeclared fields, and a hit without `entity` cannot be mapped to an Open Mercato entity |
 | Hybrid retrieval | *(warn)* keyword or vector indexing is off |
-| Driver registered | no `fulltext` strategy in the container — i.e. the app forgot the wiring in step 4, which is otherwise completely silent |
+| Driver registered | no `fulltext` strategy in the container — otherwise completely silent |
+| Field policies loaded | no search configs visible in this runtime. Usually means a `portal:`/`link` install (see above); left unchecked this driver indexes empty documents and the built-in Meilisearch driver indexes *every* field |
 | Cross-tenant isolation | a planted canary from a second synthetic tenant came back. **This is the check the command exists for.** |
 | Range-filter bug | *(warn)* reports whether the upstream Cloudflare bug is still present |
 

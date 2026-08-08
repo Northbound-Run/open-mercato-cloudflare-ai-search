@@ -1,6 +1,6 @@
 {
   "name": "@northbound-run/search-cloudflare",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Cloudflare AI Search as a pluggable fulltext driver for Open Mercato: hybrid BM25 + vector retrieval behind the stock FullTextSearchDriver contract, with no search service to operate.",
   "type": "module",
   "main": "./dist/index.js",
